@@ -1,0 +1,16 @@
+name: Kotlin service pipeline
+
+on:
+  workflow_call:
+    secrets:
+      GH_PACKAGES_USER:
+        required: true
+      GH_PACKAGES_READ_TOKEN:
+        required: true
+
+jobs:
+  verify:
+    uses: ./.github/workflows/kotlin-ci.yml
+    secrets:
+      GH_PACKAGES_USER: ${{ secrets.GH_PACKAGES_USER }}
+      GH_PACKAGES_READ_TOKEN: ${{ secrets.GH_PACKAGES_READ_TOKEN }}
