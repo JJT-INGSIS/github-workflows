@@ -1,0 +1,120 @@
+name: Deploy Swarm release
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      mode:
+        type: string
+        default: full
+      service:
+        type: string
+        default: ''
+      digest:
+        type: string
+        default: ''
+      snippets_version:
+        type: string
+        default: ''
+      permissions_version:
+        type: string
+        default: ''
+      printscript_version:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate and build deployment request
+        env:
+          DEPLOY_ENV: ${{ inputs.environment }}
+          DEPLOY_MODE: ${{ inputs.mode }}
+          SERVICE: ${{ inputs.service }}
+          DIGEST: ${{ inputs.digest }}
+          SNIPPETS_VERSION: ${{ inputs.snippets_version }}
+          PERMISSIONS_VERSION: ${{ inputs.permissions_version }}
+          PRINTSCRIPT_VERSION: ${{ inputs.printscript_version }}
+        run: python3 scripts/make_request.py > request.json
+      - name: Configure verified SSH connection
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ vars.SSH_PORT || '22' }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ "$SSH_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]] && (( SSH_PORT > 0 && SSH_PORT < 65536 ))
+          [[ -n "$SSH_PRIVATE_KEY" && -n "$SSH_KNOWN_HOSTS" ]]
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$RUNNER_TEMP/deploy-key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy-known-hosts"
+          chmod 600 "$RUNNER_TEMP/deploy-key" "$RUNNER_TEMP/deploy-known-hosts"
+          cat > "$HOME/.ssh/config" <<CONFIG
+          Host swarm-target
+            HostName $SSH_HOST
+            User $SSH_USER
+            Port $SSH_PORT
+            IdentityFile $RUNNER_TEMP/deploy-key
+            UserKnownHostsFile $RUNNER_TEMP/deploy-known-hosts
+            StrictHostKeyChecking yes
+            BatchMode yes
+            IdentitiesOnly yes
+            ConnectTimeout 15
+            ServerAliveInterval 30
+            ServerAliveCountMax 3
+          CONFIG
+          chmod 600 "$HOME/.ssh/config"
+      - name: Upload deployment configuration
+        id: remote
+        run: |
+          set -euo pipefail
+          remote_dir=$(ssh swarm-target 'mktemp -d /tmp/snippet-deploy.XXXXXXXX')
+          [[ "$remote_dir" =~ ^/tmp/snippet-deploy\.[a-zA-Z0-9]{8}$ ]]
+          echo "directory=$remote_dir" >> "$GITHUB_OUTPUT"
+          tar -czf - swarm scripts request.json | ssh swarm-target "tar -xzf - -C '$remote_dir'"
+      - name: Login to GHCR on the manager
+        env:
+          REMOTE_DIR: ${{ steps.remote.outputs.directory }}
+          GHCR_USER: ${{ secrets.GHCR_USER }}
+          GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$GHCR_USER" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]*$ && -n "$GHCR_READ_TOKEN" ]]
+          printf '%s' "$GHCR_READ_TOKEN" | ssh swarm-target \
+            "DOCKER_CONFIG='$REMOTE_DIR/.docker' docker login ghcr.io --username '$GHCR_USER' --password-stdin"
+      - name: Deploy, verify and record the release
+        env:
+          REMOTE_DIR: ${{ steps.remote.outputs.directory }}
+        run: |
+          set -euo pipefail
+          ssh swarm-target "cd '$REMOTE_DIR' && DOCKER_CONFIG='$REMOTE_DIR/.docker' bash scripts/remote-deploy.sh request.json"
+          ssh swarm-target "cat '$REMOTE_DIR/result.json'" > release.json
+          { echo 'Deployed release:'; echo '```json'; cat release.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ inputs.environment }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release.json
+          retention-days: 90
+      - name: Remove temporary credentials and configuration
+        if: always()
+        env:
+          REMOTE_DIR: ${{ steps.remote.outputs.directory }}
+        run: |
+          if [[ "$REMOTE_DIR" =~ ^/tmp/snippet-deploy\.[a-zA-Z0-9]{8}$ ]]; then
+            ssh swarm-target "rm -rf -- '$REMOTE_DIR'" || true
+          fi
+          rm -f "$RUNNER_TEMP/deploy-key" "$RUNNER_TEMP/deploy-known-hosts"

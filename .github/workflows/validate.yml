@@ -1,0 +1,24 @@
+name: Validate workflows
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate workflow syntax
+        # actionlint does not yet recognize the documented $/ self reference.
+        run: >-
+          docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
+          -ignore 'reusable workflow call "\$/\.github/workflows/'
+      - name: Install test dependency
+        run: python3 -m pip install PyYAML==6.0.2
+      - name: Test image release behavior
+        run: python3 -B -m unittest discover -s tests -v

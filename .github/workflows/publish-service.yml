@@ -1,0 +1,81 @@
+name: Publish service image
+
+on:
+  workflow_call:
+    secrets:
+      GH_PACKAGES_USER:
+        required: true
+      GH_PACKAGES_READ_TOKEN:
+        required: true
+      INFRA_DISPATCH_TOKEN:
+        required: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: publish-${{ github.repository }}-main
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image name and existing publication
+        id: image
+        shell: bash
+        env:
+          REPOSITORY: ${{ github.repository }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]'):sha-${COMMIT}"
+          echo "ref=$image" >> "$GITHUB_OUTPUT"
+          if docker buildx imagetools inspect "$image" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build and push once per commit
+        if: steps.image.outputs.exists == 'false'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.image.outputs.ref }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          secrets: |
+            github_actor=${{ secrets.GH_PACKAGES_USER }}
+            github_token=${{ secrets.GH_PACKAGES_READ_TOKEN }}
+      - name: Record digest and notify infra
+        env:
+          IMAGE: ${{ steps.image.outputs.ref }}
+          SERVICE: ${{ github.event.repository.name }}
+          DISPATCH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          digest=$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest}}' | jq -er '.digest')
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          printf 'Published `%s` → `%s`\n' "$IMAGE" "$digest" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -z "$DISPATCH_TOKEN" ]]; then
+            echo 'CD notification disabled: configure INFRA_DISPATCH_TOKEN after dev bootstrap.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          jq -n --arg service "$SERVICE" --arg digest "$digest" \
+            '{event_type: "service-published", client_payload: {service: $service, digest: $digest}}' > "$RUNNER_TEMP/dispatch.json"
+          curl --fail-with-body --silent --show-error \
+            -H "Authorization: Bearer $DISPATCH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            --data-binary "@$RUNNER_TEMP/dispatch.json" \
+            https://api.github.com/repos/JJT-INGSIS/snippet-searcher-infra/dispatches
