@@ -85,7 +85,7 @@ docker image inspect ghcr.io/jjt-ingsis/snippets-service@sha256:<digest> --forma
 
 ## Branches y ambientes
 
-Los tres servicios e infra usan `feature → dev → main`. Crear `dev` desde `main` actualizado; las ramas cortas por cambio nacen desde `dev` y vuelven mediante PR. Usar squash para feature → dev y merge commit para dev → main. Mantener `main` como default branch. Si hay un cambio exclusivo en `main`, sincronizarlo a `dev` mediante una PR.
+Los tres servicios e infra usan `feature → dev → main`, con `dev` como default branch para que las PRs apunten inicialmente a la integración. Crear `dev` desde `main` actualizado; las ramas cortas por cambio nacen desde `dev` y vuelven mediante PR. Usar squash para feature → dev y merge commit para dev → main. Las promociones eligen `main` explícitamente. Si hay un cambio exclusivo en `main`, sincronizarlo a `dev` mediante una PR.
 
 Proteger ambas ramas con PR, CI requerido, actualización con la base antes del merge y sin pushes directos habituales. Mantener deshabilitada la aprobación humana obligatoria. Hacer existir/pasar un check nuevo antes de exigirlo. No exigir el job de publicación como check de PR: en una PR se omite correctamente.
 
@@ -97,10 +97,10 @@ Configuración aplicada en GitHub durante SNI-23:
 
 | Repositorios | Branches | Protecciones | Environments |
 | --- | --- | --- | --- |
-| Los tres servicios | `dev` creada desde `main`; default `main` | PR y `verify / verify / build` requerido con rama actualizada en ambas; sin review obligatoria | `dev` solo desde `dev`; `prod` solo desde `main` |
-| `snippet-searcher-infra` | `dev` creada desde `main`; default `main` | PR en ambas; CI requerido y actualización pendientes de la primera ejecución verde del nuevo check | Mismas restricciones |
+| Los tres servicios | `dev` creada desde `main`; default `dev` | PR y `verify / verify / build` requerido con rama actualizada en ambas; sin review obligatoria | `dev` solo desde `dev`; `prod` solo desde `main` |
+| `snippet-searcher-infra` | `dev` creada desde `main`; default `dev` | PR en ambas; CI requerido y actualización pendientes de la primera ejecución verde del nuevo check | Mismas restricciones |
 
-En infra, después de comprobar la primera ejecución, agregar `Validate infrastructure` como check requerido y activar la actualización con la rama base en las dos reglas. Los environments todavía no tienen datos de SSH; se cargan en SNI-25. Los workflows preparados siguen pendientes de commit, integración y publicación de su versión.
+En infra, después de comprobar la primera ejecución, agregar `Validate infrastructure` como check requerido y activar la actualización con la rama base en las dos reglas. Los environments todavía no tienen datos de SSH; se cargan en SNI-25. Los workflows están integrados y publicados como `v0.3.1`; CI y publicación por push a dev pasaron en los tres consumidores. Quedan pendientes las verificaciones manuales y de arranque por digest.
 
 Contrato para SNI-25, aún sin valores reales:
 
@@ -115,25 +115,29 @@ El futuro recorrido de `cd.yml` será publicar → desplegar en dev, y seleccion
 
 ## Integración y versionado de SNI-23
 
-Esta branch prepara `v0.3.0`. `v0.2.0` ya existe en otro trabajo de CD con un recorrido diferente; conservar ese tag y no moverlo. Los callers preparados apuntan a `v0.3.0`, que todavía debe publicarse después de validar e integrar estos archivos.
+El commit `73cc46862500f0cd19736f047d834ea7738d6021` pasó CI y publicación desde los tres servicios cuando los callers lo referenciaban por SHA. `v0.3.0` es un tag anotado al mismo commit, pero las ejecuciones por ese tag fallaron al resolver los workflows anidados. El error muestra `47bf4ee23975a7379767e73757a1e4ca72845af3`, el objeto del tag, en lugar del commit. Este comportamiento coincide con el [reporte de tags anotados y workflows anidados](https://github.com/orgs/community/discussions/206746).
+
+Se publicó `v0.3.1` como tag liviano al mismo commit. Los tres consumidores pasaron CI y publicación con esa referencia. No cambia el código de CI/CD. Conservar `v0.3.0` y `v0.2.0`; no sobrescribir tags publicados. El resultado por SHA no sustituye la prueba por el tag final.
 
 Orden de integración:
 
 1. Subir la branch central `feat/sni-23-image-publication`. Obtener su SHA con `git rev-parse HEAD` después del commit.
 2. Verificar las ramas `dev` ya creadas en GitHub desde `main` en los tres servicios e infra; traerlas con `git fetch origin` en otros clones.
-3. Para verificar el candidato, reemplazar temporalmente `@v0.3.0` de los callers por `@<SHA del candidato central>`. Abrir las PRs de los servicios hacia `dev`; solo ejecutan CI. Integrarlas en `dev` para comprobar publicación real con esa referencia concreta. No usar un tag que todavía no exista.
-4. Integrar el repo central a `main`, comprobar que conserva el contenido verificado y publicar la nueva versión desde ese commit:
+3. Para futuros cambios, validar el candidato por SHA, conservando su rama hasta cerrar la prueba. Si se integra con squash, el commit integrado tiene otro SHA: comprobar su contenido y probar esa referencia antes de versionar.
+4. Para esta corrección, crear un tag liviano al commit ya probado. Deshabilitar explícitamente la firma automática para que una configuración local no convierta el tag en anotado:
 
    ```bash
-   git switch main
-   git pull --ff-only
-   git tag v0.3.0
-   git push origin v0.3.0
+   git -c tag.gpgSign=false tag v0.3.1 73cc46862500f0cd19736f047d834ea7738d6021
+   git cat-file -t v0.3.1
+   git rev-parse 'v0.3.1^{commit}'
+   git push origin v0.3.1
    ```
 
-5. Actualizar los callers de `dev` al tag `@v0.3.0` mediante PR, y comprobar las tres publicaciones con la versión final.
+   Antes del push, `cat-file` debe devolver `commit` y `rev-parse` el SHA indicado. No usar `git tag -a`, `-s` ni `-m` para estas versiones de workflows. En el remoto, el objeto de `refs/tags/v0.3.1` también debe ser de tipo `commit` y tener ese SHA.
+
+5. Abrir primero la PR de Snippets hacia `dev` con `@v0.3.1`. Comprobar CI en la PR y CI/publicación después del merge. Solo después de esa prueba, integrar los callers de Permissions y PrintScript y comprobar sus publicaciones. Si la prueba falla, investigar la anotación antes de extender el cambio; no presentar el tag como validado solo porque existe.
 6. Integrar CI de infra, exigir su nuevo check una vez comprobado y promover las configuraciones de `dev` a `main` mediante PR. Verificar las rules y environments ya creadas.
-7. La ejecución manual se habilita cuando el caller con `workflow_dispatch` está en `main`, la default branch. Desde Actions → Pipeline → Run workflow, seleccionar `dev` o `main` y activar `publish` solo para bootstrap. Siempre ejecuta CI primero.
+7. La ejecución manual requiere que el caller con `workflow_dispatch` exista en la default branch, actualmente `dev` en los servicios e infra. Desde Actions → Pipeline → Run workflow, seleccionar `dev` o `main` y activar `publish` solo para bootstrap. Siempre ejecuta CI primero.
 
 Los tags publicados son referencias estables y no se sobrescriben. El versionado de este repo es independiente de `gradle-conventions`; no necesita coincidir con su versión Maven.
 
