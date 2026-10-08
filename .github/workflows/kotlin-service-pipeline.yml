@@ -2,15 +2,67 @@ name: Kotlin service pipeline
 
 on:
   workflow_call:
+    inputs:
+      publish:
+        description: Publicar la imagen después de CI en dev o en una ejecución manual de bootstrap.
+        required: false
+        default: false
+        type: boolean
+      image-name:
+        description: Nombre completo del paquete GHCR del servicio caller.
+        required: false
+        default: ''
+        type: string
+      platforms:
+        description: Plataformas Linux separadas por comas, sin espacios.
+        required: false
+        default: linux/amd64
+        type: string
     secrets:
       GH_PACKAGES_USER:
         required: true
       GH_PACKAGES_READ_TOKEN:
         required: true
+    outputs:
+      image:
+        description: Nombre del paquete publicado; vacío si no se solicitó publicación.
+        value: ${{ jobs.cd.outputs.image }}
+      digest:
+        description: Digest exacto de la imagen publicada.
+        value: ${{ jobs.cd.outputs.digest }}
+      image-ref:
+        description: Referencia de imagen por digest para despliegue.
+        value: ${{ jobs.cd.outputs.image-ref }}
+      source-sha:
+        description: Commit del código construido.
+        value: ${{ jobs.cd.outputs.source-sha }}
+      source-tree:
+        description: Identificador Git del contenido del commit construido.
+        value: ${{ jobs.cd.outputs.source-tree }}
 
 jobs:
   verify:
+    permissions:
+      contents: read
     uses: $/.github/workflows/kotlin-ci.yml
+    secrets:
+      GH_PACKAGES_USER: ${{ secrets.GH_PACKAGES_USER }}
+      GH_PACKAGES_READ_TOKEN: ${{ secrets.GH_PACKAGES_READ_TOKEN }}
+
+  cd:
+    needs: verify
+    if: >-
+      inputs.publish &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
+       (github.event_name == 'workflow_dispatch' &&
+        (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')))
+    permissions:
+      contents: read
+      packages: write
+    uses: $/.github/workflows/cd.yml
+    with:
+      image-name: ${{ inputs.image-name }}
+      platforms: ${{ inputs.platforms }}
     secrets:
       GH_PACKAGES_USER: ${{ secrets.GH_PACKAGES_USER }}
       GH_PACKAGES_READ_TOKEN: ${{ secrets.GH_PACKAGES_READ_TOKEN }}

@@ -1,0 +1,167 @@
+name: CD
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        description: Paquete GHCR del caller, por ejemplo ghcr.io/jjt-ingsis/snippets-service.
+        required: true
+        type: string
+      platforms:
+        description: linux/amd64, linux/arm64 o ambas separadas por comas, sin espacios.
+        required: false
+        default: linux/amd64
+        type: string
+    secrets:
+      GH_PACKAGES_USER:
+        required: true
+      GH_PACKAGES_READ_TOKEN:
+        required: true
+    outputs:
+      image:
+        description: Nombre del paquete publicado.
+        value: ${{ jobs.publish.outputs.image }}
+      digest:
+        description: Digest exacto de la imagen publicada.
+        value: ${{ jobs.publish.outputs.digest }}
+      image-ref:
+        description: Referencia del paquete por digest, sin depender de un tag mutable.
+        value: ${{ jobs.publish.outputs.image-ref }}
+      source-sha:
+        description: Commit del código construido.
+        value: ${{ jobs.publish.outputs.source-sha }}
+      source-tree:
+        description: Identificador Git del contenido del commit construido.
+        value: ${{ jobs.publish.outputs.source-tree }}
+
+jobs:
+  publish:
+    name: Build & Publish Docker Image
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
+      (github.event_name == 'workflow_dispatch' &&
+       (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.source.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
+      image-ref: ${{ steps.publication.outputs.image-ref }}
+      source-sha: ${{ steps.source.outputs.source-sha }}
+      source-tree: ${{ steps.source.outputs.source-tree }}
+
+    steps:
+      - name: Checkout the verified commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Validate publication inputs and record source
+        id: source
+        shell: bash
+        env:
+          IMAGE_NAME: ${{ inputs.image-name }}
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          set -euo pipefail
+          expected_image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          if [[ "$IMAGE_NAME" != "$expected_image" ]]; then
+            echo "::error::image-name debe ser el paquete GHCR del repositorio caller: $expected_image"
+            exit 1
+          fi
+          if [[ ! "$PLATFORMS" =~ ^linux/(amd64|arm64)(,linux/(amd64|arm64))*$ ]]; then
+            echo "::error::platforms debe contener linux/amd64, linux/arm64 o ambas separadas por comas, sin espacios."
+            exit 1
+          fi
+          source_sha="$(git rev-parse HEAD)"
+          if [[ "$source_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::El checkout no corresponde al commit verificado por CI."
+            exit 1
+          fi
+          source_tree="$(git rev-parse 'HEAD^{tree}')"
+          platform_scope="${PLATFORMS//\//-}"
+          platform_scope="${platform_scope//,/-}"
+          {
+            printf 'image=%s\n' "$IMAGE_NAME"
+            printf 'source-sha=%s\n' "$source_sha"
+            printf 'source-tree=%s\n' "$source_tree"
+            printf 'cache-scope=%s-%s\n' "${GITHUB_REPOSITORY#*/}" "$platform_scope"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU for ARM64
+        if: contains(inputs.platforms, 'linux/arm64')
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image tags and labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.source.outputs.image }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=sha-${{ steps.source.outputs.source-sha }}
+            type=raw,value=run-${{ github.run_id }}-${{ github.run_attempt }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.source-sha }}
+            io.jjt.source-tree=${{ steps.source.outputs.source-tree }}
+            io.jjt.actions-run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Build and push the service image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: ${{ inputs.platforms }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          secrets: |
+            github_actor=${{ secrets.GH_PACKAGES_USER }}
+            github_token=${{ secrets.GH_PACKAGES_READ_TOKEN }}
+          cache-from: type=gha,version=2,scope=${{ steps.source.outputs.cache-scope }}
+          cache-to: type=gha,version=2,scope=${{ steps.source.outputs.cache-scope }},mode=max
+
+      - name: Record the exact published image
+        id: publication
+        shell: bash
+        env:
+          IMAGE_NAME: ${{ steps.source.outputs.image }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          SOURCE_SHA: ${{ steps.source.outputs.source-sha }}
+          SOURCE_TREE: ${{ steps.source.outputs.source-tree }}
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::El build no devolvió un digest válido; la publicación no se considera confirmada."
+            exit 1
+          fi
+          image_ref="$IMAGE_NAME@$IMAGE_DIGEST"
+          printf 'image-ref=%s\n' "$image_ref" >> "$GITHUB_OUTPUT"
+          {
+            printf '## Imagen publicada\n\n'
+            printf '| Dato | Valor |\n| --- | --- |\n'
+            printf '| Imagen exacta | `%s` |\n' "$image_ref"
+            printf '| Commit | `%s` |\n' "$SOURCE_SHA"
+            printf '| Contenido Git | `%s` |\n' "$SOURCE_TREE"
+            printf '| Plataformas | `%s` |\n' "$PLATFORMS"
+            printf '| Tag de ejecución | `run-%s-%s` |\n\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+            printf 'Esta ejecución publicó la imagen. La comprobación en una VM y la promoción a prod se incorporan en SNI-25.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
