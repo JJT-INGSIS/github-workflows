@@ -16,8 +16,17 @@ cancelación u omisión no cuentan como éxito. No vuelve a ejecutar Gradle.
 
 `cd.yml` mantiene jobs separados: `publish` en dev, `select` en main y `deploy` tras
 el job correspondiente exitoso. La condición de deploy contempla que el otro job
-esté omitido. `main` no construye imágenes. Los outputs `image`, `digest`, `image-ref`,
-`source-sha` y `source-tree` corresponden tanto a publicación como a selección.
+esté omitido. `main` no construye imágenes. Publicación y selección devuelven un
+único output interno `artifact` con cinco datos: `image-ref`, `source-sha`,
+`source-tree`, `build-run-id` y `build-run-attempt`. Deploy lo transforma en un
+pedido validado. Los callers no consumen outputs de CD ni del pipeline.
+
+El pipeline tiene solamente `verify`, `result` y `cd`. No hay un job separado
+para política de publicación: los scripts rechazan una solicitud de build desde
+main. Tampoco necesita detección de rutas: cada servicio vive en su propio repo.
+El YAML orquesta Actions y comandos pequeños; infra conserva las comprobaciones
+de evidencia, SSH y estado remoto. La imagen se inspecciona una vez en el runner,
+antes de SSH. La autorización se revalida en la VM bajo el lock.
 
 Publicar solo es compatible con SNI-23 (`publish=true`, `deploy=false`). La evidencia
 para prod requiere además CD verificado. Los paquetes anteriores, sin la etiqueta
@@ -25,24 +34,29 @@ de intento de construcción ni evidencia SNI-25, no son promoción válida por s
 
 ## Orden de integración (sin desplegar todavía)
 
+La implementación original está integrada: infra `7f91f1cc800d9059cdfcfe005a330dccbdb4196b`
+y workflows `v0.4.0` (`49014e0df8df8a634a78dabb85e4ff5adb1d992c`). Las siguientes
+instrucciones corresponden a la simplificación y a una versión nueva.
+
 1. Revisar e integrar primero `snippet-searcher-infra`, rama
-   `feat/sni-25-service-deployment`, con tests y validación de stack verdes.
-2. Infra integrada y fijada en `cd.yml` mediante `INFRA_REVISION`:
-   `7f91f1cc800d9059cdfcfe005a330dccbdb4196b` (PR #12).
-   Es una constante revisada, no un input de los callers ni una rama móvil;
-   los scripts corren con privilegios en las VMs.
-3. Revisar la rama central `feat/sni-25-swarm-cd`. Validar los workflows localmente
+   `refactor/sni-25-deployment-scripts`, con tests y validación de stack verdes.
+2. Fijar el **nuevo SHA completo de infra integrado** en `cd.yml`: `INFRA_REVISION`
+   apunta a `d86ab1e4928a3e51ef11676bcdbe2da28ffaf9b3` (infra PR #13, CI verde).
+   La revisión anterior no implementa los comandos simplificados. Es una constante revisada, no un
+   input de los callers ni una rama móvil; los scripts corren con privilegios en las VMs.
+3. Revisar la rama central `refactor/sni-25-declarative-cd`. Validar los workflows localmente
    y subir un candidato por SHA cuando el equipo autorice los commits/push.
 4. Probar Snippets usando temporalmente **ese SHA central** y conservando la rama.
    Primero PR/CI y publicación sin despliegue; después probar environment y dev
    con la configuración siguiente. El lint local no sustituye la ejecución de Actions.
 5. Integrar el central en main, comprobar el SHA definitivo y repetir su prueba
-   si el merge cambió la revisión. Crear un tag **liviano** `v0.4.0` al commit
+   si el merge cambió la revisión. Crear un tag **liviano** `v0.5.0` al commit
    probado; verificar local y remoto que el objeto sea `commit`. No sobrescribir tags.
 6. Probar el tag final primero en Snippets; recién entonces integrar los callers
-   de Permissions y PrintScript preparados con `@v0.4.0` y comprobarlos.
-7. Cuando aparezca y pase el agregador nuevo, elegir su nombre completo en las
-   protecciones. Conservar el check previo durante la transición.
+   de Permissions y PrintScript con la nueva versión y comprobarlos. Sus inputs
+   actuales siguen sirviendo; basta cambiar la referencia después de probarla.
+7. Comprobar que los checks requeridos siguen pasando. La simplificación conserva
+   los nombres de CI y `Resultado requerido`; no obliga a cambiar protecciones.
 
 Los cambios locales no publican esa versión. Mantener `CD_ENABLED` y
 `PROD_DEPLOY_ENABLED` deshabilitados hasta completar la preparación y las pruebas
@@ -60,8 +74,10 @@ la branch dev. Cargar:
 | Secrets del environment | `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS` |
 | Variable de repositorio | `CD_ENABLED=true` después de preparar la VM y credenciales |
 
-Thiago entrega las claves públicas de host verificadas y autoriza una clave
-dedicada a CD. No obtener `known_hosts` de la red sin verificar su identidad.
+Consultar primero `docs/sni-20-acceso-vms.md`, `docs/sni-24-bootstrap.md` y
+`docs/sni-24-evidencia.md` de infra para el acceso, bootstrap y pruebas existentes.
+Autorizar una clave dedicada a CD y verificar las claves públicas de host con esa
+información. No obtener `known_hosts` de la red sin verificar su identidad.
 El job final declara `environment: dev/prod`; los jobs que llaman workflows
 reutilizables no lo declaran. Los secretos SSH opcionales se reenvían explícitamente
 por la cadena, y los del environment se resuelven en el ejecutor final. La prueba
@@ -142,7 +158,7 @@ El wrapper usa una imagen de actionlint fijada por digest. Su versión todavía 
 reconoce `$/`, soportado por GitHub y usado por los workflows actuales. Adapta ese
 prefijo únicamente en una copia temporal para validar los contratos locales; no
 modifica los YAML oficiales ni omite los checks de expresiones, inputs o ShellCheck.
-Solo se suprime SC2016 en los formatos printf que muestran backticks literales de Markdown.
+El CD ya no contiene bloques Bash/Python inline ni necesita supresiones de ShellCheck.
 
 Para cerrar el ticket hace falta evidencia real: PR sin CD; dev con publicación,
 deploy y checks; prod con el mismo digest; rechazo sin evidencia; rollback

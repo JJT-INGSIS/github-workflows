@@ -4,17 +4,18 @@ on:
   workflow_call:
     inputs:
       image-name:
-        description: Paquete GHCR del caller, por ejemplo ghcr.io/jjt-ingsis/snippets-service.
+        description: Paquete GHCR exacto del servicio caller.
         required: true
         type: string
       platforms:
-        description: linux/amd64, linux/arm64 o ambas separadas por comas, sin espacios.
-        required: false
         default: linux/amd64
         type: string
+      publish:
+        description: Publicar desde dev; pedirlo desde main falla.
+        default: false
+        type: boolean
       deploy:
-        description: Actualizar el servicio por SSH después de publicar o seleccionar.
-        required: false
+        description: Desplegar después de CI; habilitación gradual.
         default: false
         type: boolean
     secrets:
@@ -26,125 +27,78 @@ on:
         required: false
       SSH_KNOWN_HOSTS:
         required: false
-    outputs:
-      image:
-        description: Nombre del paquete publicado o seleccionado.
-        value: ${{ jobs.publish.outputs.image || jobs.select.outputs.image }}
-      digest:
-        description: Digest exacto de la imagen publicada o seleccionada.
-        value: ${{ jobs.publish.outputs.digest || jobs.select.outputs.digest }}
-      image-ref:
-        description: Referencia del paquete por digest, sin depender de un tag mutable.
-        value: ${{ jobs.publish.outputs.image-ref || jobs.select.outputs.image-ref }}
-      source-sha:
-        description: Commit del código construido.
-        value: ${{ jobs.publish.outputs.source-sha || jobs.select.outputs.source-sha }}
-      source-tree:
-        description: Identificador Git del contenido del commit construido.
-        value: ${{ jobs.publish.outputs.source-tree || jobs.select.outputs.source-tree }}
 
-# Reviewed infra commit containing SNI-25. It cannot be supplied by a service caller.
+
 env:
-  INFRA_REVISION: 7f91f1cc800d9059cdfcfe005a330dccbdb4196b
+  INFRA_REVISION: d86ab1e4928a3e51ef11676bcdbe2da28ffaf9b3
+  PUBLISH_REQUESTED: ${{ inputs.publish }}
+  PROD_DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
 
 jobs:
   publish:
     name: Build & Publish Docker Image
-    if: >-
-      github.ref == 'refs/heads/dev' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: github.ref == 'refs/heads/dev' && (inputs.publish || inputs.deploy)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
     outputs:
-      image: ${{ steps.source.outputs.image }}
-      digest: ${{ steps.build.outputs.digest }}
-      image-ref: ${{ steps.publication.outputs.image-ref }}
-      source-sha: ${{ steps.source.outputs.source-sha }}
-      source-tree: ${{ steps.source.outputs.source-tree }}
-      build-run-id: ${{ steps.source.outputs.build-run-id }}
-      build-run-attempt: ${{ steps.source.outputs.build-run-attempt }}
-
+      artifact: ${{ steps.publication.outputs.artifact }}
     steps:
-      - name: Checkout the verified commit
+      - name: Checkout the verified service
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
+          path: source
           persist-credentials: false
-
-      - name: Validate publication inputs and record source
+      - name: Checkout trusted CD tools
+        uses: actions/checkout@v7
+        with:
+          repository: JJT-INGSIS/snippet-searcher-infra
+          ref: ${{ env.INFRA_REVISION }}
+          path: infra
+          persist-credentials: false
+      - name: Prepare publication metadata
         id: source
-        shell: bash
+        working-directory: source
         env:
           IMAGE_NAME: ${{ inputs.image-name }}
           PLATFORMS: ${{ inputs.platforms }}
-        run: |
-          set -euo pipefail
-          expected_image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          if [[ "$IMAGE_NAME" != "$expected_image" ]]; then
-            echo "::error::image-name debe ser el paquete GHCR del repositorio caller: $expected_image"
-            exit 1
-          fi
-          if [[ ! "$PLATFORMS" =~ ^linux/(amd64|arm64)(,linux/(amd64|arm64))*$ ]]; then
-            echo "::error::platforms debe contener linux/amd64, linux/arm64 o ambas separadas por comas, sin espacios."
-            exit 1
-          fi
-          source_sha="$(git rev-parse HEAD)"
-          if [[ "$source_sha" != "$GITHUB_SHA" ]]; then
-            echo "::error::El checkout no corresponde al commit verificado por CI."
-            exit 1
-          fi
-          source_tree="$(git rev-parse 'HEAD^{tree}')"
-          platform_scope="${PLATFORMS//\//-}"
-          platform_scope="${platform_scope//,/-}"
-          {
-            printf 'image=%s\n' "$IMAGE_NAME"
-            printf 'source-sha=%s\n' "$source_sha"
-            printf 'source-tree=%s\n' "$source_tree"
-            printf 'build-run-id=%s\n' "$GITHUB_RUN_ID"
-            printf 'build-run-attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
-            printf 'cache-scope=%s-%s\n' "${GITHUB_REPOSITORY#*/}" "$platform_scope"
-          } >> "$GITHUB_OUTPUT"
-
+        run: python3 ../infra/scripts/cd_evidence.py source
       - name: Set up QEMU for ARM64
         if: contains(inputs.platforms, 'linux/arm64')
         uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GitHub Container Registry
+      - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract image tags and labels
+          password: ${{ github.token }}
+      - name: Extract tags and labels
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ${{ steps.source.outputs.image }}
           flavor: latest=false
           tags: |
-            type=raw,value=sha-${{ steps.source.outputs.source-sha }}
+            type=raw,value=sha-${{ github.sha }}
             type=raw,value=run-${{ github.run_id }}-${{ github.run_attempt }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ steps.source.outputs.source-sha }}
-            io.jjt.source-tree=${{ steps.source.outputs.source-tree }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            io.jjt.source-tree=${{ steps.source.outputs.tree }}
             io.jjt.actions-run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
             io.jjt.actions-run-attempt=${{ github.run_attempt }}
-
-      - name: Build and push the service image
+      - name: Build and push image
         id: build
         uses: docker/build-push-action@v7
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./source
+          file: ./source/Dockerfile
           push: true
           platforms: ${{ inputs.platforms }}
           tags: ${{ steps.meta.outputs.tags }}
@@ -154,84 +108,37 @@ jobs:
             github_token=${{ secrets.GH_PACKAGES_READ_TOKEN }}
           cache-from: type=gha,version=2,scope=${{ steps.source.outputs.cache-scope }}
           cache-to: type=gha,version=2,scope=${{ steps.source.outputs.cache-scope }},mode=max
-
-      - name: Record the exact published image
+      - name: Export published artifact
         id: publication
-        shell: bash
         env:
           IMAGE_NAME: ${{ steps.source.outputs.image }}
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
-          SOURCE_SHA: ${{ steps.source.outputs.source-sha }}
-          SOURCE_TREE: ${{ steps.source.outputs.source-tree }}
-          PLATFORMS: ${{ inputs.platforms }}
-        run: |
-          set -euo pipefail
-          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::El build no devolvió un digest válido; la publicación no se considera confirmada."
-            exit 1
-          fi
-          image_ref="$IMAGE_NAME@$IMAGE_DIGEST"
-          printf 'image-ref=%s\n' "$image_ref" >> "$GITHUB_OUTPUT"
-          # Markdown backticks in these printf formats are intentionally literal.
-          # shellcheck disable=SC2016
-          {
-            printf '## Imagen publicada\n\n'
-            printf '| Dato | Valor |\n| --- | --- |\n'
-            printf '| Imagen exacta | `%s` |\n' "$image_ref"
-            printf '| Commit | `%s` |\n' "$SOURCE_SHA"
-            printf '| Contenido Git | `%s` |\n' "$SOURCE_TREE"
-            printf '| Plataformas | `%s` |\n' "$PLATFORMS"
-            printf '| Tag de ejecución | `run-%s-%s` |\n\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
-            printf 'Publicar no confirma funcionamiento: el job de despliegue debe verificar la VM y registrar evidencia antes de promover a prod.\n'
-          } >> "$GITHUB_STEP_SUMMARY"
+          SOURCE_TREE: ${{ steps.source.outputs.tree }}
+        run: python3 infra/scripts/cd_evidence.py published
 
   select:
     name: Select verified DEV image
-    if: >-
-      inputs.deploy && github.ref == 'refs/heads/main' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: github.ref == 'refs/heads/main' && (inputs.publish || inputs.deploy)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
-      pull-requests: read
       deployments: read
     outputs:
-      image: ${{ steps.select.outputs.image }}
-      digest: ${{ steps.select.outputs.digest }}
-      image-ref: ${{ steps.select.outputs.image-ref }}
-      source-sha: ${{ steps.select.outputs.source-sha }}
-      source-tree: ${{ steps.select.outputs.source-tree }}
-      build-run-id: ${{ steps.select.outputs.build-run-id }}
-      build-run-attempt: ${{ steps.select.outputs.build-run-attempt }}
+      artifact: ${{ steps.select.outputs.artifact }}
     steps:
-      - name: Verify integration and production gates
-        env:
-          PROD_DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
-        run: |
-          test "$PROD_DEPLOY_ENABLED" = true || { echo 'Prod deshabilitada: verificar protección de main y completar la habilitación.'; exit 1; }
-          [[ "$INFRA_REVISION" =~ ^[0-9a-f]{40}$ ]] || { echo 'Falta fijar el commit revisado de infra SNI-25.'; exit 1; }
-      - name: Checkout promoted source
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          path: source
-          persist-credentials: false
-      - name: Checkout trusted deployment tools
+      - name: Checkout trusted CD tools
         uses: actions/checkout@v7
         with:
           repository: JJT-INGSIS/snippet-searcher-infra
           ref: ${{ env.INFRA_REVISION }}
           path: infra
           persist-credentials: false
-      - name: Select exact historical evidence and inspect digest
+      - name: Select exact historical evidence
         id: select
-        working-directory: source
         env:
           GH_TOKEN: ${{ github.token }}
-          DEPLOY_ENV: prod
-          PROD_DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
-        run: python3 ../infra/scripts/cd_evidence.py select "$RUNNER_TEMP/selected-request.json"
+        run: python3 infra/scripts/cd_evidence.py select
 
   deploy:
     name: Deploy and verify
@@ -242,8 +149,7 @@ jobs:
        (github.ref == 'refs/heads/main' && needs.select.result == 'success'))
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    environment:
-      name: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+    environment: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
     concurrency:
       group: sni25-${{ github.repository }}-${{ github.ref_name }}
       cancel-in-progress: false
@@ -253,28 +159,19 @@ jobs:
       pull-requests: read
       deployments: write
     env:
-      DEPLOY_ENV: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
-      IMAGE_REF: ${{ needs.publish.outputs.image-ref || needs.select.outputs.image-ref }}
-      SOURCE_SHA: ${{ needs.publish.outputs.source-sha || needs.select.outputs.source-sha }}
-      SOURCE_TREE: ${{ needs.publish.outputs.source-tree || needs.select.outputs.source-tree }}
-      BUILD_RUN_ID: ${{ needs.publish.outputs.build-run-id || needs.select.outputs.build-run-id }}
-      BUILD_RUN_ATTEMPT: ${{ needs.publish.outputs.build-run-attempt || needs.select.outputs.build-run-attempt }}
-      PROD_DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
+      ARTIFACT: ${{ needs.publish.outputs.artifact || needs.select.outputs.artifact }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Verify integration gate
-        run: |
-          [[ "$INFRA_REVISION" =~ ^[0-9a-f]{40}$ ]] || { echo 'Falta fijar el commit revisado de infra SNI-25.'; exit 1; }
-      - name: Checkout trusted deployment tools
+      - name: Checkout trusted CD tools
         uses: actions/checkout@v7
         with:
           repository: JJT-INGSIS/snippet-searcher-infra
           ref: ${{ env.INFRA_REVISION }}
           path: infra
           persist-credentials: false
-      - name: Validate exact image and prepare request
+      - name: Validate image and prepare deployment
         run: python3 infra/scripts/cd_evidence.py prepare "$RUNNER_TEMP/request.json"
-      - name: Deploy and reconcile through strict SSH
+      - name: Deploy through strict SSH
         env:
           SSH_HOST: ${{ vars.SSH_HOST }}
           SSH_USER: ${{ vars.SSH_USER }}
@@ -282,23 +179,9 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: python3 infra/scripts/ssh_deploy.py "$RUNNER_TEMP/request.json" "$RUNNER_TEMP/receipt.json"
-      - name: Record verified dev evidence
+      - name: Record verified DEV evidence
         if: github.ref == 'refs/heads/dev'
         run: python3 infra/scripts/cd_evidence.py record "$RUNNER_TEMP/receipt.json"
       - name: Deployment summary
         if: always()
-        run: |
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          receipt = Path(os.environ['RUNNER_TEMP']) / 'receipt.json'
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
-              output.write('## Despliegue SNI-25\n\n')
-              if receipt.exists():
-                  result = json.loads(receipt.read_text())
-                  for key in ('environment', 'service', 'image-ref', 'source-sha', 'source-tree', 'outcome'):
-                      output.write(f'- {key}: `{result[key]}`\n')
-                  output.write('\nLa confirmación completa también requiere el registro de evidencia en dev.\n')
-              else:
-                  output.write('Despliegue no confirmado. Consultar el diario remoto antes de reintentar.\n')
-          PY
+        run: python3 infra/scripts/cd_evidence.py summary "$RUNNER_TEMP/receipt.json"

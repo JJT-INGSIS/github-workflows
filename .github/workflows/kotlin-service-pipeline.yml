@@ -32,41 +32,8 @@ on:
         required: false
       SSH_KNOWN_HOSTS:
         required: false
-    outputs:
-      image:
-        description: Nombre del paquete publicado o seleccionado; vacío sin CD.
-        value: ${{ jobs.cd.outputs.image }}
-      digest:
-        description: Digest exacto de la imagen publicada o seleccionada.
-        value: ${{ jobs.cd.outputs.digest }}
-      image-ref:
-        description: Referencia de imagen por digest para despliegue.
-        value: ${{ jobs.cd.outputs.image-ref }}
-      source-sha:
-        description: Commit del código construido.
-        value: ${{ jobs.cd.outputs.source-sha }}
-      source-tree:
-        description: Identificador Git del contenido del commit construido.
-        value: ${{ jobs.cd.outputs.source-tree }}
 
 jobs:
-  publication-policy:
-    name: Validate publication policy
-    if: >-
-      (inputs.publish || inputs.deploy) &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - name: Reject production rebuild
-        if: inputs.publish && github.ref == 'refs/heads/main'
-        run: |
-          echo '::error::main no publica ni reconstruye. Promover un digest verificado en dev.'
-          exit 1
-      - name: Publication policy accepted
-        run: echo 'Publicación en dev y promoción por digest en main.'
-
   verify:
     permissions:
       contents: read
@@ -89,7 +56,7 @@ jobs:
         run: test "$CI_RESULT" = success
 
   cd:
-    needs: [verify, publication-policy]
+    needs: verify
     if: >-
       (inputs.publish || inputs.deploy) &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
@@ -102,6 +69,7 @@ jobs:
       deployments: write
     uses: $/.github/workflows/cd.yml
     with:
+      publish: ${{ inputs.publish }}
       image-name: ${{ inputs.image-name }}
       platforms: ${{ inputs.platforms }}
       deploy: ${{ inputs.deploy }}

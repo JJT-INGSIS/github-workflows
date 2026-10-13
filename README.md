@@ -71,8 +71,11 @@ ghcr.io/jjt-ingsis/printscript-service
 Tags `sha-<SHA completo>` y `run-<run_id>-<run_attempt>`, sin `latest`.
 **Desplegar por digest**: reconstruir un commit puede cambiar sus tags.
 Las etiquetas incluyen repositorio, commit, Git tree y run/attempt de construcción.
-Los outputs `image`, `digest`, `image-ref`, `source-sha`, `source-tree` identifican
-la imagen publicada en dev o seleccionada para prod; quedan vacíos sin CD.
+Entre jobs se pasa un único descriptor JSON `artifact`: referencia por digest,
+commit y árbol de origen, run e intento de construcción. Es un output interno;
+los callers no necesitan outputs del workflow. No se suben ni descargan archivos
+de Actions para transportar estos datos. El resumen de construcción lo genera
+la Action de Docker y el de despliegue se obtiene del recibo remoto.
 
 Buildx usa caché `type=gha` API v2 por servicio/plataformas. Esta caché no conserva
 automáticamente los mounts Gradle entre runners. El Dockerfile empaqueta con
@@ -103,9 +106,10 @@ La API administrativa devolvió 403. Desde el navegador se activó y se verific�
 el 13/10/2026 `Do not allow bypassing the above settings` en main de los tres
 servicios: PR, CI y base actualizada se exigen también a administradores, sin
 bypass específico de PR ni force push. Producción no se habilitó; todavía requiere
-credenciales, integración y pruebas reales. El CD contiene un placeholder que
-exige fijar primero el commit de infra integrado. No integrar los callers al
-futuro v0.4.0 hasta publicarlo.
+credenciales y pruebas reales. `v0.4.0` ya está publicada y los servicios la usan.
+Esta simplificación fija `INFRA_REVISION` al commit de infra integrado y validado
+`d86ab1e4928a3e51ef11676bcdbe2da28ffaf9b3` (PR #13). Incluye los seis comandos
+del runner; los callers no pueden elegir otra revisión de los scripts.
 
 La [guía de integración SNI-25](docs/sni-25-integration.md) explica el orden de
 integración, versionado, configuración, pruebas y protecciones. El
@@ -119,15 +123,17 @@ CI/publicación v0.3.1 se verificó en los tres servicios al commit
 commit y las llamadas anidadas resolvieron el objeto del tag en lugar del commit;
 v0.3.1 es liviano. Se conservan las versiones publicadas, sin sobrescribirlas.
 
-SNI-25 propone **v0.4.0, todavía no publicada por estos cambios**. Primero probar
-por SHA central y conservar su referencia, comprobar el commit integrado y luego
-probar el tag final antes de extenderlo a los tres servicios. Para crear el tag
-liviano cuando se autorice la publicación:
+SNI-25 original está publicado en **v0.4.0**, al commit
+`49014e0df8df8a634a78dabb85e4ff5adb1d992c`. La versión simplificada **v0.5.0**
+elimina outputs públicos que no usan los servicios y cambia
+el contrato interno con infra. Primero probar por SHA central y conservar su
+referencia; después comprobar el commit integrado y el tag final antes de extenderlo
+a los tres servicios. Para crear el tag liviano cuando se autorice la publicación:
 
 ```bash
-git -c tag.gpgSign=false tag v0.4.0 <SHA-central-integrado-y-probado>
-git cat-file -t v0.4.0
-git rev-parse 'v0.4.0^{commit}'
+git -c tag.gpgSign=false tag v0.5.0 <SHA-central-integrado-y-probado>
+git cat-file -t v0.5.0
+git rev-parse 'v0.5.0^{commit}'
 ```
 
 `cat-file` debe devolver `commit`; confirmar también el SHA y tipo en el remoto
