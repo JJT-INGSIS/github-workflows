@@ -1,5 +1,6 @@
 """Validate YAML/expressions with pinned actionlint; adapt its missing $/ support."""
 from pathlib import Path
+import os
 import subprocess
 import tempfile
 
@@ -19,7 +20,10 @@ def main():
             text = path.read_text(encoding='utf-8').replace('uses: $/.github/workflows/', 'uses: ./.github/workflows/')
             (workflows / path.name).write_text(text, encoding='utf-8', newline='\n')
         files = [f'.github/workflows/{path.name}' for path in workflows.glob('*.yml')]
-        subprocess.run(['docker', 'run', '--rm', '--mount', f'type=bind,source={target},target=/repo,readonly',
+        # TemporaryDirectory is private (0700) on Linux. Match its owner rather
+        # than assuming the image's default user can traverse the bind mount.
+        user = ['--user', f'{os.getuid()}:{os.getgid()}'] if os.name == 'posix' else []
+        subprocess.run(['docker', 'run', '--rm', *user, '--mount', f'type=bind,source={target},target=/repo,readonly',
                         '-w', '/repo', ACTIONLINT, *files], check=True)
 
 
