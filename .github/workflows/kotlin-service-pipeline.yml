@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       publish:
-        description: Publicar la imagen después de CI en dev o en una ejecución manual de bootstrap.
+        description: Publicar la imagen después de CI, exclusivamente desde dev.
         required: false
         default: false
         type: boolean
@@ -18,17 +18,26 @@ on:
         required: false
         default: linux/amd64
         type: string
+      deploy:
+        description: Desplegar después de CI; habilitación gradual de SNI-25.
+        required: false
+        default: false
+        type: boolean
     secrets:
       GH_PACKAGES_USER:
         required: true
       GH_PACKAGES_READ_TOKEN:
         required: true
+      SSH_PRIVATE_KEY:
+        required: false
+      SSH_KNOWN_HOSTS:
+        required: false
     outputs:
       image:
-        description: Nombre del paquete publicado; vacío si no se solicitó publicación.
+        description: Nombre del paquete publicado o seleccionado; vacío sin CD.
         value: ${{ jobs.cd.outputs.image }}
       digest:
-        description: Digest exacto de la imagen publicada.
+        description: Digest exacto de la imagen publicada o seleccionada.
         value: ${{ jobs.cd.outputs.digest }}
       image-ref:
         description: Referencia de imagen por digest para despliegue.
@@ -41,6 +50,23 @@ on:
         value: ${{ jobs.cd.outputs.source-tree }}
 
 jobs:
+  publication-policy:
+    name: Validate publication policy
+    if: >-
+      (inputs.publish || inputs.deploy) &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Reject production rebuild
+        if: inputs.publish && github.ref == 'refs/heads/main'
+        run: |
+          echo '::error::main no publica ni reconstruye. Promover un digest verificado en dev.'
+          exit 1
+      - name: Publication policy accepted
+        run: echo 'Publicación en dev y promoción por digest en main.'
+
   verify:
     permissions:
       contents: read
@@ -49,20 +75,38 @@ jobs:
       GH_PACKAGES_USER: ${{ secrets.GH_PACKAGES_USER }}
       GH_PACKAGES_READ_TOKEN: ${{ secrets.GH_PACKAGES_READ_TOKEN }}
 
-  cd:
+  result:
+    name: Resultado requerido
     needs: verify
-    if: >-
-      inputs.publish &&
-      ((github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
-       (github.event_name == 'workflow_dispatch' &&
-        (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')))
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
+    steps:
+      - name: Confirmar CI completo
+        env:
+          CI_RESULT: ${{ needs.verify.result }}
+        run: test "$CI_RESULT" = success
+
+  cd:
+    needs: [verify, publication-policy]
+    if: >-
+      (inputs.publish || inputs.deploy) &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
       packages: write
+      deployments: write
     uses: $/.github/workflows/cd.yml
     with:
       image-name: ${{ inputs.image-name }}
       platforms: ${{ inputs.platforms }}
+      deploy: ${{ inputs.deploy }}
     secrets:
       GH_PACKAGES_USER: ${{ secrets.GH_PACKAGES_USER }}
       GH_PACKAGES_READ_TOKEN: ${{ secrets.GH_PACKAGES_READ_TOKEN }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
