@@ -124,8 +124,8 @@ commit y las llamadas anidadas resolvieron el objeto del tag en lugar del commit
 v0.3.1 es liviano. Se conservan las versiones publicadas, sin sobrescribirlas.
 
 SNI-25 original está publicado en **v0.4.0**, al commit
-`49014e0df8df8a634a78dabb85e4ff5adb1d992c`. Esta simplificación propone **v0.5.0**,
-todavía sin publicar: elimina outputs públicos que no usan los servicios y cambia
+`49014e0df8df8a634a78dabb85e4ff5adb1d992c`. La versión simplificada **v0.5.0**
+elimina outputs públicos que no usan los servicios y cambia
 el contrato interno con infra. Primero probar por SHA central y conservar su
 referencia; después comprobar el commit integrado y el tag final antes de extenderlo
 a los tres servicios. Para crear el tag liviano cuando se autorice la publicación:
