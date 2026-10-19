@@ -141,6 +141,18 @@ después de publicarlo. No usar `-a`, `-s` ni `-m`. El versionado es independien
 de gradle-conventions. Si estos repos públicos se privatizan, configurar acceso
 para llamadas y checkouts antes de habilitar CD.
 
+### Corrección de rollback v0.5.1
+
+Mantiene el contrato público de v0.5.0 y fija infra al commit
+`c2180b28abc1b44b9aecfdf855ff7af544339523`. La prueba real en dev detectó
+que el verificador rechazaba `rollback_started` incluso cuando Swarm ya estaba
+recuperando el digest anterior esperado. Ahora espera su convergencia y los 60
+segundos de estabilidad, conservando el rechazo de otro digest y de un rollback
+pausado. La Action de una candidata fallida continúa en rojo.
+
+No sobrescribir v0.5.0. Antes de cerrar SNI-25, repetir el rollback real con
+v0.5.1 y verificar el registro `recovered` sin operaciones pendientes.
+
 ## Validación local
 
 ```bash
