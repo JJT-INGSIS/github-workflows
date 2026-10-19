@@ -30,7 +30,7 @@ on:
 
 
 env:
-  INFRA_REVISION: d86ab1e4928a3e51ef11676bcdbe2da28ffaf9b3
+  INFRA_REVISION: c2180b28abc1b44b9aecfdf855ff7af544339523
   PUBLISH_REQUESTED: ${{ inputs.publish }}
   PROD_DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
 
