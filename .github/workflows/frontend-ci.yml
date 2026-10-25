@@ -1,0 +1,36 @@
+name: Frontend CI
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: Frontend CI
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - name: Browser integration against contracts
+        run: |
+          npm run dev -- --host 127.0.0.1 --port 5173 --strictPort > "$RUNNER_TEMP/ui-vite.log" 2>&1 &
+          ui_pid=$!
+          trap 'kill "$ui_pid"' EXIT
+          for _ in $(seq 1 30); do
+            if curl --fail --silent http://localhost:5173/ > /dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://localhost:5173/ > /dev/null
+          npm run test:contracts
+      - name: Packaged UI runtime acceptance
+        # A PR validates packaging. Push builds the published candidate once in CD.
+        if: github.event_name == 'pull_request'
+        run: npm run test:container

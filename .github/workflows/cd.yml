@@ -20,9 +20,9 @@ on:
         type: boolean
     secrets:
       GH_PACKAGES_USER:
-        required: true
+        required: false
       GH_PACKAGES_READ_TOKEN:
-        required: true
+        required: false
       SSH_PRIVATE_KEY:
         required: false
       SSH_KNOWN_HOSTS:
@@ -30,7 +30,8 @@ on:
 
 
 env:
-  INFRA_REVISION: c2180b28abc1b44b9aecfdf855ff7af544339523
+  # Reviewed SNI-43 tools, integrated through infra PR #19 with CI green.
+  INFRA_REVISION: 27e060dee43b92896d6b57ee3ed0d17bed8e92a4
   PUBLISH_REQUESTED: ${{ inputs.publish }}
   PROD_DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
 

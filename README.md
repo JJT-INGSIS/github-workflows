@@ -4,10 +4,24 @@ Automatización reutilizable para los tres servicios de Snippet Searcher. Cada
 servicio conserva sus triggers en `.github/workflows/pipeline.yml`; el central
 coordina CI, publicación y despliegue independiente.
 
+## Extensión SNI-43 — v0.6.0 en preparación
+
+[Orden de integración y compatibilidad](docs/sni-43-integration.md). Mantiene los
+tres jobs de CD y el contrato Kotlin; amplía las herramientas de infra para
+NGINX/Asset y el mapeo autorizado de UI. frontend-ci.yml acredita sus checks
+frontend y comparte revisión con CD para generar evidencia de promoción confiable.
+Infra PR #19 fija las herramientas al SHA revisado
+`27e060dee43b92896d6b57ee3ed0d17bed8e92a4`; no hay revisión elegida por callers.
+Actualizar callers y procedimientos manuales antes de ampliar cada stack;
+v0.5.1 no puede operar sobre el registro nuevo. No se activaron componentes en VMs.
+
 ## Estructura y responsabilidades
 
 - `kotlin-ci.yml`: `bash ./gradlew build --no-daemon`, Ubuntu 24.04 y JDK 21.
   Gradle controla tests, ktlint, detekt y JaCoCo.
+- `frontend-ci.yml`: CI de UI con npm, checks existentes, Cypress y aceptación
+  del contenedor en PR. La evidencia UI exige su ejecución exitosa y la misma
+  revisión central que CD; no pasa por Gradle.
 - `kotlin-service-pipeline.yml`: CI requerido, agregador de PR y CD tras CI exitoso.
 - `cd.yml`: jobs `publish` (dev), `select` (main) y `deploy` (ambiente correspondiente).
 - `validate.yml`: valida YAML, expresiones y scripts mediante actionlint fijado por digest.
