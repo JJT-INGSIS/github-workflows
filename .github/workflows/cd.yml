@@ -30,8 +30,8 @@ on:
 
 
 env:
-  # Reviewed SNI-43 tools, integrated through infra PR #19 with CI green.
-  INFRA_REVISION: 27e060dee43b92896d6b57ee3ed0d17bed8e92a4
+  # Reviewed SNI-40 tools, integrated through infra PR #23 with CI green.
+  INFRA_REVISION: 9f7eee846922a602dec33df46069e73689eaaebe
   PUBLISH_REQUESTED: ${{ inputs.publish }}
   PROD_DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
 

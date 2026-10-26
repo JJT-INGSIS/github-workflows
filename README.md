@@ -4,6 +4,15 @@ Automatización reutilizable para los tres servicios de Snippet Searcher. Cada
 servicio conserva sus triggers en `.github/workflows/pipeline.yml`; el central
 coordina CI, publicación y despliegue independiente.
 
+## v0.6.1 — infra con TLS (SNI-40)
+
+`INFRA_REVISION` pasa a `9f7eee846922a602dec33df46069e73689eaaebe` (infra PR #23).
+Ese infra registra NGINX con `tls` en lugar de `port`, y v0.6.0 no puede leer ese
+registro. Callers de snippets, permissions, printscript y ui pasan a `@v0.6.1`
+antes del primer corte de NGINX; el control de corte de infra exige esa versión.
+No cambia el contrato de inputs, jobs ni secrets.
+
+
 ## Extensión SNI-43 — v0.6.0 en preparación
 
 [Orden de integración y compatibilidad](docs/sni-43-integration.md). Mantiene los
