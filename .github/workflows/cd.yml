@@ -30,8 +30,8 @@ on:
 
 
 env:
-  # Reviewed SNI-40 tools, integrated through infra PR #23 with CI green.
-  INFRA_REVISION: 9f7eee846922a602dec33df46069e73689eaaebe
+  # Reviewed SNI-44 tools, including the SNI-42 healthcheck escaping fix (infra PR #31).
+  INFRA_REVISION: 9fcc49204260566667171cdde320eea8f81c965d
   PUBLISH_REQUESTED: ${{ inputs.publish }}
   PROD_DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
 
