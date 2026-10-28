@@ -4,6 +4,16 @@ Automatización reutilizable para los tres servicios de Snippet Searcher. Cada
 servicio conserva sus triggers en `.github/workflows/pipeline.yml`; el central
 coordina CI, publicación y despliegue independiente.
 
+## v0.6.2 — herramientas corregidas para aceptación SNI-44
+
+Fija infra `9fcc49204260566667171cdde320eea8f81c965d` (PR #31) para incluir el arreglo del doble escape de
+healthchecks y el gate de callers v0.6.2 antes de ensayar reapply/reconciliación.
+No cambia inputs, secrets, jobs ni el protocolo de promoción por digest. Publicar
+el tag nuevo y actualizar los cuatro callers antes de reaplicar infraestructura;
+no reejecutar herramientas antiguas para recuperar el stack ampliado.
+Las comprobaciones externas y las fallas controladas son opt-in, fuera del CI
+de runners públicos. La aceptación remota se documenta en infra, SNI-44.
+
 ## v0.6.1 — infra con TLS (SNI-40)
 
 `INFRA_REVISION` pasa a `9f7eee846922a602dec33df46069e73689eaaebe` (infra PR #23).
