@@ -30,8 +30,8 @@ on:
 
 
 env:
-  # Reviewed SNI-44 tools, including the SNI-42 healthcheck escaping fix (infra PR #31).
-  INFRA_REVISION: 9fcc49204260566667171cdde320eea8f81c965d
+  # Reviewed SNI-56 tools: optional Redis, selective rollout and preserved independent CD (infra PR #38).
+  INFRA_REVISION: 9c8ec4d98c249a3d75dd4559e01636eddf4c8f2a
   PUBLISH_REQUESTED: ${{ inputs.publish }}
   PROD_DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
 

@@ -188,6 +188,16 @@ v0.5.1 y verificar el registro `recovered` sin operaciones pendientes.
 
 ## Validación local
 
+### CD v0.6.3 — SNI-56
+
+Fija infra en `9c8ec4d98c249a3d75dd4559e01636eddf4c8f2a` (infra PR #38).
+Conserva los contratos de los callers y permite leer releases con Redis sin
+alterar las demás imágenes durante despliegues independientes. No instala Redis
+ni habilita workers por actualizar el caller. Publicar un tag nuevo `v0.6.3`, sin
+mover `v0.6.2`, y migrar los cuatro callers antes del corte explícito de Redis.
+El corte usa el registro confirmado del ambiente y el protocolo de infra bajo
+lock/journal. Producción no se despliega como parte de SNI-56.
+
 ```bash
 python3 scripts/lint_workflows.py
 ```
