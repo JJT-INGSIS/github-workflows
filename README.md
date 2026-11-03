@@ -190,6 +190,13 @@ v0.5.1 y verificar el registro `recovered` sin operaciones pendientes.
 
 ### CD v0.6.3 — SNI-56
 
+Actualización correctiva **v0.6.4**: fija infra en
+`f53128784f2af913a7c0c0d1b42b167e2e482e2a` (infra PR #40), que completa los módulos
+y recursos Redis del bundle SSH. v0.6.3 fallaba al validar un release con Redis
+desde el tar extraído, antes de actualizar la aplicación. No se mueve el tag
+anterior ni se cambia el contrato público del workflow. Migrar callers de dev
+secuencialmente, comprobando cada CI/CD; no promover cambios a prod.
+
 Fija infra en `9c8ec4d98c249a3d75dd4559e01636eddf4c8f2a` (infra PR #38).
 Conserva los contratos de los callers y permite leer releases con Redis sin
 alterar las demás imágenes durante despliegues independientes. No instala Redis

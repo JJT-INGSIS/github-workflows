@@ -30,8 +30,8 @@ on:
 
 
 env:
-  # Reviewed SNI-56 tools: optional Redis, selective rollout and preserved independent CD (infra PR #38).
-  INFRA_REVISION: 9c8ec4d98c249a3d75dd4559e01636eddf4c8f2a
+  # Reviewed infra PR #40: complete Redis dependencies/resources in the extracted SSH bundle.
+  INFRA_REVISION: f53128784f2af913a7c0c0d1b42b167e2e482e2a
   PUBLISH_REQUESTED: ${{ inputs.publish }}
   PROD_DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
 
