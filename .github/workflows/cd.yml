@@ -30,8 +30,8 @@ on:
 
 
 env:
-  # Reviewed infra PR #40: complete Redis dependencies/resources in the extracted SSH bundle.
-  INFRA_REVISION: f53128784f2af913a7c0c0d1b42b167e2e482e2a
+  # SNI-82: reviewed DEV monitor compatibility; merge/verify infra before releasing this workflow.
+  INFRA_REVISION: 9cd0e2d37ca0f4361b77b552986bad3ee3a76ce5
   PUBLISH_REQUESTED: ${{ inputs.publish }}
   PROD_DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
 
