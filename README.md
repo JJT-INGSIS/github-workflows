@@ -188,6 +188,28 @@ v0.5.1 y verificar el registro `recovered` sin operaciones pendientes.
 
 ## Validación local
 
+### CD v0.6.5 — compatibilidad con monitoreo DEV (SNI-82)
+
+Candidato: fija infra en `9cd0e2d37ca0f4361b77b552986bad3ee3a76ce5`, que reconoce
+el runtime de monitoreo DEV aprobado sin aceptar configuraciones o secretos
+arbitrarios. Conserva alias privados y configuración Redis durante despliegues
+independientes y rechaza reaplicar el stack completo antes de mutaciones si el
+manifiesto todavía no representa ese monitor. No cambia inputs, permisos, secretos,
+imágenes de aplicación ni la habilitación de PROD del workflow.
+
+Se conserva un SHA inmutable en vez de seguir `dev`: cada ejecución usa las
+herramientas revisadas, a costo de actualizar esta referencia en cada corrección.
+El nombre del candidato no implica que el tag esté publicado ni que DEV se haya
+validado con este workflow.
+
+Orden de activación: integrar el fix de infra con CI verde; integrar este cambio
+tras validar los workflows; publicar un **tag nuevo** `v0.6.5` sin mover `v0.6.4`;
+migrar los callers secuencialmente y verificar un piloto DEV antes de continuar.
+La integración del código no modifica los callers fijados a la versión anterior.
+No ejecutar un despliegue mientras DEV esté desasignada ni declarar activación
+por una validación estática. Las señales JDBC/pool y las alertas conservan sus
+responsables y aceptación independientes.
+
 ### CD v0.6.3 — SNI-56
 
 Actualización correctiva **v0.6.4**: fija infra en
