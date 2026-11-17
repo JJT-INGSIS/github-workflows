@@ -30,8 +30,8 @@ on:
 
 
 env:
-  # SNI-82: reviewed DEV monitor compatibility; merge/verify infra before releasing this workflow.
-  INFRA_REVISION: 9cd0e2d37ca0f4361b77b552986bad3ee3a76ce5
+  # SNI-74: paired DEV Auth0 rollout, scoped recovery and preserved observability.
+  INFRA_REVISION: 4ecb9ebec028bd42531dfdf208667b14b78e3922
   PUBLISH_REQUESTED: ${{ inputs.publish }}
   PROD_DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
 
