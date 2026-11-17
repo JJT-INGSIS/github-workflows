@@ -235,3 +235,16 @@ Requiere Docker. El wrapper adapta `$/` solo en una copia temporal porque la ver
 actual de actionlint no reconoce ese prefijo; los workflows oficiales lo conservan.
 No se omiten los checks de contratos, expresiones ni ShellCheck. Las pruebas reales
 de Actions, secrets y VMs siguen pendientes y están enumeradas en la guía SNI-25.
+
+### CD v0.6.6 — Auth0 de DEV sin perder observabilidad (SNI-74)
+
+Fija infra en `4ecb9ebec028bd42531dfdf208667b14b78e3922`: configuración pública
+coherente entre UI y API, corte `--auth-only` y recuperación con alcance persistido.
+El bundle mantiene el soporte APM y los sondeos admiten el 401 Bearer de Auth0.
+Actualizar el caller por sí solo no activa Auth0 ni cambia grants o secretos.
+
+Se conserva una revisión inmutable en lugar de seguir una rama: facilita reproducir
+y auditar cada despliegue; exige publicar un tag nuevo y coordinar los cuatro
+callers antes del corte. Integrar y verificar infra primero, publicar `v0.6.6`
+sin mover tags existentes y verificar los callers antes de activar DEV.
+La aceptación final requiere login real en la URL pública; un 401 no lo acredita.
