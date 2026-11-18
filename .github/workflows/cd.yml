@@ -30,8 +30,8 @@ on:
 
 
 env:
-  # SNI-83: background activation from the release, keeping Auth0 and APM.
-  INFRA_REVISION: e294c17e5d4e078d325decf1912f9d011ff271c4
+  # SNI-83: background activation; the pinned revision gates cutovers on v0.6.8.
+  INFRA_REVISION: cbd30f98224f82919fc5b12211aed49c36aef308
   PUBLISH_REQUESTED: ${{ inputs.publish }}
   PROD_DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
 

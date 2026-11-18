@@ -261,3 +261,15 @@ servicios sin el overlay y apagaría el publicador y el consumidor en silencio.
 Actualizar el caller no prende nada: sin `background` en el release todo sigue apagado.
 Publicar `v0.6.7` sin mover tags existentes y pasar los cuatro callers antes de activar
 el procesamiento de fondo en DEV.
+
+### CD v0.6.8 — Corrige v0.6.7 para cortes de infraestructura (SNI-83)
+
+Fija infra en `cbd30f98224f82919fc5b12211aed49c36aef308`. `v0.6.7` fijaba `e294c17`,
+cuyo `redis_cd.VERSION` seguía exigiendo callers `v0.6.6`: los deploys de servicios
+funcionan, pero cualquier `deploy --infrastructure` con Redis rechaza los callers.
+La revisión nueva nombra `v0.6.8` y comprueba además que el SHA fijado traiga el soporte
+de `background`. No usar `v0.6.7`; queda publicada porque los tags no se mueven.
+
+Regla para el próximo tag: el commit de infra que se fija debe subir `redis_cd.VERSION`
+al tag que lo va a fijar, antes de publicarlo.
+
