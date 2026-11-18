@@ -248,3 +248,16 @@ y auditar cada despliegue; exige publicar un tag nuevo y coordinar los cuatro
 callers antes del corte. Integrar y verificar infra primero, publicar `v0.6.6`
 sin mover tags existentes y verificar los callers antes de activar DEV.
 La aceptación final requiere login real en la URL pública; un 401 no lo acredita.
+
+### CD v0.6.7 — Procesamiento de fondo desde el release (SNI-83)
+
+Fija infra en `e294c17e5d4e078d325decf1912f9d011ff271c4`, que contiene lo de v0.6.6
+(Auth0, APM, recuperación acotada) y agrega el campo `background: {publisher, consumer}`
+del release: el overlay `stack.background.yaml`, el corte `--background-only` sobre
+Snippets y PrintScript y la verificación de sus variables efectivas en cada deploy.
+
+Sin esta versión, un deploy de Snippets o PrintScript con v0.6.6 reconstruiría esos
+servicios sin el overlay y apagaría el publicador y el consumidor en silencio.
+Actualizar el caller no prende nada: sin `background` en el release todo sigue apagado.
+Publicar `v0.6.7` sin mover tags existentes y pasar los cuatro callers antes de activar
+el procesamiento de fondo en DEV.
