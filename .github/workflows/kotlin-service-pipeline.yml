@@ -19,7 +19,7 @@ on:
         default: linux/amd64
         type: string
       deploy:
-        description: Desplegar después de CI; habilitación gradual de SNI-25.
+        description: Desplegar en dev o promover a prod después de CI.
         required: false
         default: false
         type: boolean
@@ -37,7 +37,7 @@ jobs:
   verify:
     permissions:
       contents: read
-    uses: $/.github/workflows/kotlin-ci.yml
+    uses: $/.github/workflows/ci.yml
     secrets:
       GH_PACKAGES_USER: ${{ secrets.GH_PACKAGES_USER }}
       GH_PACKAGES_READ_TOKEN: ${{ secrets.GH_PACKAGES_READ_TOKEN }}
@@ -47,8 +47,7 @@ jobs:
     needs: verify
     if: ${{ always() && github.event_name == 'pull_request' }}
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
+    permissions: {}
     steps:
       - name: Confirmar CI completo
         env:

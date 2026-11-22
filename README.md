@@ -36,7 +36,7 @@ v0.5.1 no puede operar sobre el registro nuevo. No se activaron componentes en V
 
 ## Estructura y responsabilidades
 
-- `kotlin-ci.yml`: `bash ./gradlew build --no-daemon`, Ubuntu 24.04 y JDK 21.
+- `ci.yml`: `bash ./gradlew build --no-daemon`, Ubuntu 24.04 y JDK 21.
   Gradle controla tests, ktlint, detekt y JaCoCo.
 - `frontend-ci.yml`: CI de UI con npm, checks existentes, Cypress y aceptación
   del contenedor en PR. La evidencia UI exige su ejecución exitosa y la misma

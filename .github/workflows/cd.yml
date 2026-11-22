@@ -11,11 +11,11 @@ on:
         default: linux/amd64
         type: string
       publish:
-        description: Publicar desde dev; pedirlo desde main falla.
+        description: Solicita construir y publicar una imagen en GHCR desde dev, sin requerir despliegue. En main se rechaza.
         default: false
         type: boolean
       deploy:
-        description: Desplegar después de CI; habilitación gradual.
+        description: Despliega y verifica tras un CI exitoso. En dev publica y despliega la imagen. En main promueve el digest verificado en dev si PROD está habilitado.
         default: false
         type: boolean
     secrets:
@@ -30,7 +30,6 @@ on:
 
 
 env:
-  # SNI-83: background activation; the pinned revision gates cutovers on v0.6.8.
   INFRA_REVISION: cbd30f98224f82919fc5b12211aed49c36aef308
   PUBLISH_REQUESTED: ${{ inputs.publish }}
   PROD_DEPLOY_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}

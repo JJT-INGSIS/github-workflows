@@ -21,7 +21,7 @@ resuelve en los scripts revisados, nunca mediante un servicio arbitrario del cal
 
 Las credenciales `GH_PACKAGES_USER`/`GH_PACKAGES_READ_TOKEN` pasan a ser opcionales
 **sólo en cd.yml**, para permitir un futuro build de UI sin dependencias Maven.
-El wrapper Kotlin y kotlin-ci.yml siguen exigiéndolas. La publicación GHCR sigue
+El wrapper Kotlin y el CI que invoca siguen exigiéndolas. La publicación GHCR sigue
 usando github.token; no se envían credenciales de build a las VMs. SNI-42 debe
 implementar Dockerfile, runtime config y caller propio dependiente de frontend-ci.yml.
 Ese CI reutiliza los checks previos de UI, incluido Cypress, y comprueba la imagen
