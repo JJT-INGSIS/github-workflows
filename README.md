@@ -1,275 +1,46 @@
-# GitHub workflows
+# GitHub workflows de Snippet Searcher
 
-Automatización reutilizable para los tres servicios de Snippet Searcher. Cada
-servicio conserva sus triggers en `.github/workflows/pipeline.yml`; el central
-coordina CI, publicación y despliegue independiente.
+Este repositorio define el CI y CD reutilizable. Cada servicio define sus disparadores en `.github/workflows/pipeline.yml` y fija la versión de los workflows que consume.
 
-## v0.6.2 — herramientas corregidas para aceptación SNI-44
+## Callers y eventos
 
-Fija infra `9fcc49204260566667171cdde320eea8f81c965d` (PR #31) para incluir el arreglo del doble escape de
-healthchecks y el gate de callers v0.6.2 antes de ensayar reapply/reconciliación.
-No cambia inputs, secrets, jobs ni el protocolo de promoción por digest. Publicar
-el tag nuevo y actualizar los cuatro callers antes de reaplicar infraestructura;
-no reejecutar herramientas antiguas para recuperar el stack ampliado.
-Las comprobaciones externas y las fallas controladas son opt-in, fuera del CI
-de runners públicos. La aceptación remota se documenta en infra, SNI-44.
-
-## v0.6.1 — infra con TLS (SNI-40)
-
-`INFRA_REVISION` pasa a `9f7eee846922a602dec33df46069e73689eaaebe` (infra PR #23).
-Ese infra registra NGINX con `tls` en lugar de `port`, y v0.6.0 no puede leer ese
-registro. Callers de snippets, permissions, printscript y ui pasan a `@v0.6.1`
-antes del primer corte de NGINX; el control de corte de infra exige esa versión.
-No cambia el contrato de inputs, jobs ni secrets.
-
-
-## Extensión SNI-43 — v0.6.0 en preparación
-
-[Orden de integración y compatibilidad](docs/sni-43-integration.md). Mantiene los
-tres jobs de CD y el contrato Kotlin; amplía las herramientas de infra para
-NGINX/Asset y el mapeo autorizado de UI. frontend-ci.yml acredita sus checks
-frontend y comparte revisión con CD para generar evidencia de promoción confiable.
-Infra PR #19 fija las herramientas al SHA revisado
-`27e060dee43b92896d6b57ee3ed0d17bed8e92a4`; no hay revisión elegida por callers.
-Actualizar callers y procedimientos manuales antes de ampliar cada stack;
-v0.5.1 no puede operar sobre el registro nuevo. No se activaron componentes en VMs.
-
-## Estructura y responsabilidades
-
-- `ci.yml`: `bash ./gradlew build --no-daemon`, Ubuntu 24.04 y JDK 21.
-  Gradle controla tests, ktlint, detekt y JaCoCo.
-- `frontend-ci.yml`: CI de UI con npm, checks existentes, Cypress y aceptación
-  del contenedor en PR. La evidencia UI exige su ejecución exitosa y la misma
-  revisión central que CD; no pasa por Gradle.
-- `kotlin-service-pipeline.yml`: CI requerido, agregador de PR y CD tras CI exitoso.
-- `cd.yml`: jobs `publish` (dev), `select` (main) y `deploy` (ambiente correspondiente).
-- `validate.yml`: valida YAML, expresiones y scripts mediante actionlint fijado por digest.
-- `scripts/lint_workflows.py`: misma validación local, incluyendo contratos reutilizables.
-
-Las llamadas internas usan `$/` para resolver archivos de este repo en la misma
-revisión invocada por el consumidor. Los checkouts de CI/build son del servicio;
-las herramientas de despliegue provienen de un commit fijo y revisado de infra.
-
-## Eventos
-
-| Evento | CI | Publicación y despliegue |
+| Caller | CI | CD |
 | --- | --- | --- |
-| PR dev/main | Completo + Resultado requerido | Ninguno |
-| Push dev | Completo | Publicar; con CD habilitado, desplegar, verificar y registrar evidencia |
-| Push main | Completo | Con CD habilitado y prod autorizado, promover el digest verificado en dev; sin build |
-| Manual dev | Completo | Publicación opcional; CD habilitado incluye publicación/verificación |
-| Manual main | Completo | Reintento de promoción; pedir publicación falla |
+| [Snippets](https://github.com/JJT-INGSIS/snippets-service) | [Pipeline Kotlin](.github/workflows/kotlin-service-pipeline.yml) con [Gradle](.github/workflows/ci.yml) | El pipeline Kotlin llama a CD después del CI. |
+| [Permissions](https://github.com/JJT-INGSIS/permissions-service) | Pipeline Kotlin | Igual que Snippets. |
+| [PrintScript](https://github.com/JJT-INGSIS/printscript-service) | Pipeline Kotlin | Igual que Snippets. |
+| [UI](https://github.com/JJT-INGSIS/snippet-searcher-ui) | [Frontend CI](.github/workflows/frontend-ci.yml) con npm, pruebas de contrato en el navegador y validación del contenedor en PR | El caller llama a CD después del CI. |
 
-CI fallido o cancelado impide CD. El agregador `Resultado requerido` no ejecuta
-Gradle nuevamente y exige `verify.result == success`. Conservar el check anterior
-`verify / verify / build` hasta comprobar el nombre y funcionamiento del nuevo.
-No exigir jobs de CD como checks de PR: se omiten correctamente.
+| Evento | Resultado |
+| --- | --- |
+| PR a `dev` o `main` | Ejecuta CI y confirma su resultado en el check requerido del caller. Sin publicación en GHCR ni despliegue. |
+| Push a `dev` | Tras CI exitoso, construye y publica en GHCR. Con CD habilitado, despliega el digest publicado y registra evidencia si las comprobaciones pasan. |
+| Push a `main` | Tras CI exitoso y con CD y PROD habilitados, promueve el digest verificado en DEV correspondiente al Git tree exacto. |
+| Ejecución manual | Sigue pasando por CI. En DEV, los callers Kotlin pueden solicitar solo publicación y el caller de UI publica. En `main` permite reintentar una promoción habilitada. |
 
-## Contrato y permisos
+## Cómo se promueve una imagen
 
-| Input | Default | Uso |
-| --- | --- | --- |
-| `publish` | `false` | Publicar desde dev después de CI |
-| `deploy` | `false` | Publicar/desplegar dev o seleccionar/desplegar prod |
-| `image-name` | Vacío | Paquete exacto `ghcr.io/<owner>/<repo>` del caller en minúsculas |
-| `platforms` | `linux/amd64` | Plataformas separadas por comas, sin espacios |
+[CD](.github/workflows/cd.yml) tiene tres jobs. `publish` construye en DEV y devuelve el digest. `select` busca en `main` un recibo de un despliegue DEV verificado. `deploy` aplica el digest por SSH al manager de Swarm del ambiente. PROD reutiliza la imagen validada en DEV.
 
-Los callers leen `DOCKER_PLATFORMS`. Las dos VMs son x64, por lo que CD requiere
-linux/amd64. QEMU se prepara solo al incluir ARM64.
+El recibo `sni25:verified` se registra en GitHub Deployments después de verificar el despliegue en DEV. Relaciona la imagen con el Git tree y la corrida que la construyó. PROD puede usar evidencia histórica aunque DEV haya avanzado. Si falta una coincidencia verificable o el CI de origen no fue exitoso, la promoción falla. Los tags de GHCR ayudan a localizar imágenes. La referencia desplegada se fija por digest.
 
-Secrets: `GH_PACKAGES_USER`, `GH_PACKAGES_READ_TOKEN` para descargar convenciones
-y biblioteca; `SSH_PRIVATE_KEY`, `SSH_KNOWN_HOSTS` opcionales para CI/publicación,
-obligatorios al desplegar. Cada salto los reenvía explícitamente. El job final de
-CD declara el environment que resuelve sus secretos y variables de SSH.
+## Variables, secretos y permisos
 
-El PAT de dependencias llega al build como secretos BuildKit `github_actor` y
-`github_token`, nunca como ARG/ENV persistidos. Preferir secrets de organización;
-los de repo del mismo nombre tienen prioridad y deben retirarse después de verificar
-la migración. GHCR y Deployments usan el token automático de Actions, sin otro PAT.
+- **Variables del repositorio consumidor.** `CD_ENABLED=true` habilita el despliegue remoto. PROD requiere además `PROD_DEPLOY_ENABLED=true`. `DOCKER_PLATFORMS` usa `linux/amd64` por defecto, plataforma requerida por las VMs.
+- **GitHub Environments.** Restringir `dev` a la rama `dev` y `prod` a `main`. Configurar `SSH_HOST`, `SSH_USER`, `SSH_PORT`, `SSH_PRIVATE_KEY` y `SSH_KNOWN_HOSTS` por ambiente. El job de despliegue verifica la clave del host y usa SSH sin interacción.
+- **Build y publicación.** Los servicios Kotlin usan `GH_PACKAGES_USER` y `GH_PACKAGES_READ_TOKEN` para sus dependencias. En el build de la imagen se pasan como secretos de BuildKit. GitHub Actions usa su token automático para GHCR y Deployments. Las credenciales de ejecución de los servicios permanecen en Swarm.
+- **Protección de PROD.** Exigir PR y checks en `main`, con la rama actualizada y sin bypass de pushes directos ni force push. El CD revalida en la VM, bajo el lock, que el HEAD esté vigente y provenga de una promoción autorizada de `dev` a `main`. Cada job recibe permisos para sus operaciones y los workflows anidados no pueden ampliarlos.
 
-El caller concede `contents: read`, `actions: read`, `pull-requests: read`,
-`packages: write` y `deployments: write`; los jobs reducen sus permisos según sus operaciones.
-Los workflows anidados no pueden aumentar los permisos del caller.
+## Versionado y compatibilidad
 
-## Imágenes y evidencia
+Los callers fijan un tag de este repo y las llamadas internas con `$/` resuelven workflows de esa misma revisión. CD fija un commit revisado de Infra en `INFRA_REVISION`. Para actualizar herramientas de despliegue, integrá primero la revisión de Infra, comprobá su compatibilidad con el registro y los controles de versión de los callers, y publicá una versión nueva del workflow sin mover tags publicados. Los callers se actualizan explícitamente.
 
-Paquetes públicos independientes:
+## Validación y recuperación
 
-```text
-ghcr.io/jjt-ingsis/snippets-service
-ghcr.io/jjt-ingsis/permissions-service
-ghcr.io/jjt-ingsis/printscript-service
-```
-
-Tags `sha-<SHA completo>` y `run-<run_id>-<run_attempt>`, sin `latest`.
-**Desplegar por digest**: reconstruir un commit puede cambiar sus tags.
-Las etiquetas incluyen repositorio, commit, Git tree y run/attempt de construcción.
-Entre jobs se pasa un único descriptor JSON `artifact`: referencia por digest,
-commit y árbol de origen, run e intento de construcción. Es un output interno;
-los callers no necesitan outputs del workflow. No se suben ni descargan archivos
-de Actions para transportar estos datos. El resumen de construcción lo genera
-la Action de Docker y el de despliegue se obtiene del recibo remoto.
-
-Buildx usa caché `type=gha` API v2 por servicio/plataformas. Esta caché no conserva
-automáticamente los mounts Gradle entre runners. El Dockerfile empaqueta con
-`bootJar`; CI ya comprobó el mismo commit con `build`.
-
-Publicación no equivale a verificación. El Deployment explícito `sni25:verified`
-guarda un recibo tras checks de la VM. Prod exige evidencia confiable, Git tree
-exacto y el mismo digest. Dev puede haber avanzado: se recupera evidencia histórica
-sin depender de logs/artefactos ni de su VM encendida. Sin coincidencia, falla.
-
-## Branches, environments y habilitación
-
-Servicios e infra: ramas cortas → PR a dev → PR dev a main. Dev es default;
-squash para cambios individuales y merge commit para promociones. Workflows y
-Gradle conventions conservan main y versiones propias.
-
-Environments de cada servicio: dev solo desde dev, prod solo desde main, sin segundo
-approval. Variables `SSH_HOST`, `SSH_USER`, `SSH_PORT` y secrets SSH. Runtime y
-contraseñas de DB permanecen en Swarm; los environments no activan perfiles Spring.
-
-Variables **de repositorio**:
-
-- `CD_ENABLED=true`: habilita despliegue remoto; sin ella, solo CI/publicación.
-- `PROD_DEPLOY_ENABLED=true`: permiso adicional después de verificar protección
-  detallada de main, aplicada a administradores y sin bypass de pushes directos.
-
-La API administrativa devolvió 403. Desde el navegador se activó y se verificó
-el 13/10/2026 `Do not allow bypassing the above settings` en main de los tres
-servicios: PR, CI y base actualizada se exigen también a administradores, sin
-bypass específico de PR ni force push. Producción no se habilitó; todavía requiere
-credenciales y pruebas reales. `v0.4.0` ya está publicada y los servicios la usan.
-Esta simplificación fija `INFRA_REVISION` al commit de infra integrado y validado
-`d86ab1e4928a3e51ef11676bcdbe2da28ffaf9b3` (PR #13). Incluye los seis comandos
-del runner; los callers no pueden elegir otra revisión de los scripts.
-
-La [guía de integración SNI-25](docs/sni-25-integration.md) explica el orden de
-integración, versionado, configuración, pruebas y protecciones. El
-[manual operativo de infra](https://github.com/JJT-INGSIS/snippet-searcher-infra/blob/dev/docs/sni-25-cd.md)
-documenta lock, journal, reconciliación SSH y rollback.
-
-## Versionado y antecedente SNI-23
-
-CI/publicación v0.3.1 se verificó en los tres servicios al commit
-`73cc46862500f0cd19736f047d834ea7738d6021`. v0.3.0 era un tag anotado al mismo
-commit y las llamadas anidadas resolvieron el objeto del tag en lugar del commit;
-v0.3.1 es liviano. Se conservan las versiones publicadas, sin sobrescribirlas.
-
-SNI-25 original está publicado en **v0.4.0**, al commit
-`49014e0df8df8a634a78dabb85e4ff5adb1d992c`. La versión simplificada **v0.5.0**
-elimina outputs públicos que no usan los servicios y cambia
-el contrato interno con infra. Primero probar por SHA central y conservar su
-referencia; después comprobar el commit integrado y el tag final antes de extenderlo
-a los tres servicios. Para crear el tag liviano cuando se autorice la publicación:
-
-```bash
-git -c tag.gpgSign=false tag v0.5.0 <SHA-central-integrado-y-probado>
-git cat-file -t v0.5.0
-git rev-parse 'v0.5.0^{commit}'
-```
-
-`cat-file` debe devolver `commit`; confirmar también el SHA y tipo en el remoto
-después de publicarlo. No usar `-a`, `-s` ni `-m`. El versionado es independiente
-de gradle-conventions. Si estos repos públicos se privatizan, configurar acceso
-para llamadas y checkouts antes de habilitar CD.
-
-### Corrección de rollback v0.5.1
-
-Mantiene el contrato público de v0.5.0 y fija infra al commit
-`c2180b28abc1b44b9aecfdf855ff7af544339523`. La prueba real en dev detectó
-que el verificador rechazaba `rollback_started` incluso cuando Swarm ya estaba
-recuperando el digest anterior esperado. Ahora espera su convergencia y los 60
-segundos de estabilidad, conservando el rechazo de otro digest y de un rollback
-pausado. La Action de una candidata fallida continúa en rojo.
-
-No sobrescribir v0.5.0. Antes de cerrar SNI-25, repetir el rollback real con
-v0.5.1 y verificar el registro `recovered` sin operaciones pendientes.
-
-## Validación local
-
-### CD v0.6.5 — compatibilidad con monitoreo DEV (SNI-82)
-
-Candidato: fija infra en `9cd0e2d37ca0f4361b77b552986bad3ee3a76ce5`, que reconoce
-el runtime de monitoreo DEV aprobado sin aceptar configuraciones o secretos
-arbitrarios. Conserva alias privados y configuración Redis durante despliegues
-independientes y rechaza reaplicar el stack completo antes de mutaciones si el
-manifiesto todavía no representa ese monitor. No cambia inputs, permisos, secretos,
-imágenes de aplicación ni la habilitación de PROD del workflow.
-
-Se conserva un SHA inmutable en vez de seguir `dev`: cada ejecución usa las
-herramientas revisadas, a costo de actualizar esta referencia en cada corrección.
-El nombre del candidato no implica que el tag esté publicado ni que DEV se haya
-validado con este workflow.
-
-Orden de activación: integrar el fix de infra con CI verde; integrar este cambio
-tras validar los workflows; publicar un **tag nuevo** `v0.6.5` sin mover `v0.6.4`;
-migrar los callers secuencialmente y verificar un piloto DEV antes de continuar.
-La integración del código no modifica los callers fijados a la versión anterior.
-No ejecutar un despliegue mientras DEV esté desasignada ni declarar activación
-por una validación estática. Las señales JDBC/pool y las alertas conservan sus
-responsables y aceptación independientes.
-
-### CD v0.6.3 — SNI-56
-
-Actualización correctiva **v0.6.4**: fija infra en
-`f53128784f2af913a7c0c0d1b42b167e2e482e2a` (infra PR #40), que completa los módulos
-y recursos Redis del bundle SSH. v0.6.3 fallaba al validar un release con Redis
-desde el tar extraído, antes de actualizar la aplicación. No se mueve el tag
-anterior ni se cambia el contrato público del workflow. Migrar callers de dev
-secuencialmente, comprobando cada CI/CD; no promover cambios a prod.
-
-Fija infra en `9c8ec4d98c249a3d75dd4559e01636eddf4c8f2a` (infra PR #38).
-Conserva los contratos de los callers y permite leer releases con Redis sin
-alterar las demás imágenes durante despliegues independientes. No instala Redis
-ni habilita workers por actualizar el caller. Publicar un tag nuevo `v0.6.3`, sin
-mover `v0.6.2`, y migrar los cuatro callers antes del corte explícito de Redis.
-El corte usa el registro confirmado del ambiente y el protocolo de infra bajo
-lock/journal. Producción no se despliega como parte de SNI-56.
+[Validate reusable workflows](.github/workflows/validate.yml) ejecuta el siguiente chequeo en PRs a `main` y pushes a `main`. Requiere Docker. El script usa una imagen de Actionlint fijada por digest y adapta `$/` solo en una copia temporal para validar los contratos entre workflows.
 
 ```bash
 python3 scripts/lint_workflows.py
 ```
 
-Requiere Docker. El wrapper adapta `$/` solo en una copia temporal porque la versión
-actual de actionlint no reconoce ese prefijo; los workflows oficiales lo conservan.
-No se omiten los checks de contratos, expresiones ni ShellCheck. Las pruebas reales
-de Actions, secrets y VMs siguen pendientes y están enumeradas en la guía SNI-25.
-
-### CD v0.6.6 — Auth0 de DEV sin perder observabilidad (SNI-74)
-
-Fija infra en `4ecb9ebec028bd42531dfdf208667b14b78e3922`: configuración pública
-coherente entre UI y API, corte `--auth-only` y recuperación con alcance persistido.
-El bundle mantiene el soporte APM y los sondeos admiten el 401 Bearer de Auth0.
-Actualizar el caller por sí solo no activa Auth0 ni cambia grants o secretos.
-
-Se conserva una revisión inmutable en lugar de seguir una rama: facilita reproducir
-y auditar cada despliegue; exige publicar un tag nuevo y coordinar los cuatro
-callers antes del corte. Integrar y verificar infra primero, publicar `v0.6.6`
-sin mover tags existentes y verificar los callers antes de activar DEV.
-La aceptación final requiere login real en la URL pública; un 401 no lo acredita.
-
-### CD v0.6.7 — Procesamiento de fondo desde el release (SNI-83)
-
-Fija infra en `e294c17e5d4e078d325decf1912f9d011ff271c4`, que contiene lo de v0.6.6
-(Auth0, APM, recuperación acotada) y agrega el campo `background: {publisher, consumer}`
-del release: el overlay `stack.background.yaml`, el corte `--background-only` sobre
-Snippets y PrintScript y la verificación de sus variables efectivas en cada deploy.
-
-Sin esta versión, un deploy de Snippets o PrintScript con v0.6.6 reconstruiría esos
-servicios sin el overlay y apagaría el publicador y el consumidor en silencio.
-Actualizar el caller no prende nada: sin `background` en el release todo sigue apagado.
-Publicar `v0.6.7` sin mover tags existentes y pasar los cuatro callers antes de activar
-el procesamiento de fondo en DEV.
-
-### CD v0.6.8 — Corrige v0.6.7 para cortes de infraestructura (SNI-83)
-
-Fija infra en `cbd30f98224f82919fc5b12211aed49c36aef308`. `v0.6.7` fijaba `e294c17`,
-cuyo `redis_cd.VERSION` seguía exigiendo callers `v0.6.6`: los deploys de servicios
-funcionan, pero cualquier `deploy --infrastructure` con Redis rechaza los callers.
-La revisión nueva nombra `v0.6.8` y comprueba además que el SHA fijado traiga el soporte
-de `background`. No usar `v0.6.7`; queda publicada porque los tags no se mueven.
-
-Regla para el próximo tag: el commit de infra que se fija debe subir `redis_cd.VERSION`
-al tag que lo va a fijar, antes de publicarlo.
-
+Si un despliegue pierde la conexión SSH, revisá el registro de la VM y reconciliá la operación antes de reintentar. Un rollback exitoso conserva el fallo de la candidata en GitHub y no revierte los datos. El [manual operativo de Infra](https://github.com/JJT-INGSIS/snippet-searcher-infra/blob/dev/docs/sni-25-cd.md) describe el lock, la evidencia y la recuperación. La [guía de cortes de infraestructura](https://github.com/JJT-INGSIS/snippet-searcher-infra/blob/dev/docs/sni-43-cd.md) cubre cambios al stack completo y compatibilidad de las herramientas.
